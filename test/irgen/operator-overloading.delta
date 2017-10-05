@@ -37,5 +37,5 @@ func main() {
 
 // CHECK-DAG: define i1 @"==<mutable vec2, vec2>"(%vec2 %a, %vec2 %b)
 func ==<T, U>(a: T, b: U) -> bool {
-    return a.x == b.x;
+    return a.x == b.x
 }

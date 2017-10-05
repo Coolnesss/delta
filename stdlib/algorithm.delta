@@ -1,0 +1,30 @@
+
+
+func swap<T>(a: mutable T&, b: mutable T&) {
+    let t = *a;
+    *a = *b;
+    *b = t;
+}
+
+func partition<T>(arr: Array<T>&, low: int, high: int) -> int {
+    var pivot = arr[high];
+    var i = (low - 1);
+    
+    for (j in low..high) {
+        if (arr[j] <= pivot) {
+            i++;
+            swap<T>(arr[i], arr[j]);
+        }
+    }
+    swap<T>(arr[i + 1], arr[high]);
+    return (i + 1);
+}
+ 
+func quickSort<T>(arr: Array<T>&, low: int, high: int) {
+    if (low < high) {
+        let pi = partition<T>(arr, low, high);
+ 
+        quickSort(arr, low, pi - 1);
+        quickSort(arr, pi + 1, high);
+    }
+}

@@ -12,6 +12,16 @@ struct Array<Element> {
         capacity = 0;
     }
 
+    init(elements: Element[]&) {
+        bufferPointer = null;
+        size = 0;
+        capacity = 0;
+
+        for (i in 0..elements.count) {
+            this.append(elements[i]);
+        }
+    }
+
     deinit() {
         free(cast<mutable void*>(bufferPointer));
     }
@@ -82,4 +92,33 @@ struct Array<Element> {
         }
         size--;
     }
+
+    func contains(array: Array<Element>) -> bool {
+        
+        for (i in 0..size) {
+            if (array[i] != this[i]) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    mutating func sort() {
+        quickSort<Element>(&this, 0, this.size);
+    }
 }
+
+ func ==<T>(a: Array<T>&, b: Array<T>&) -> bool {
+     if (a.size() != b.size()) {
+         return false;
+     }
+
+     for (i in 0..a.size()) {
+         if (a[i] != b[i]) {
+             return false;
+         }
+     }
+
+     return true;
+ }

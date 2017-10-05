@@ -1,0 +1,13 @@
+// RUN: check_exit_status 0 %delta run %s test-support.delta
+
+func main() {
+    let lol = [3,2,1];
+    let sorted = [1,2,3];
+    var array = Array<int>(&lol);
+    let array2 = Array<int>(&sorted);
+    array.sort();
+
+    for (i in 0..3) {
+        assert(array[i] == array2[i], "equals");
+    }
+}
