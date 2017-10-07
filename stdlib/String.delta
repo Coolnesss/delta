@@ -61,7 +61,7 @@ struct String {
         var hashValue: uint64 = 5381
 
         for (index in 0..characters.size()) {
-            hashValue = ((hashValue << 5) + hashValue) + characters[index]
+            hashValue = ((hashValue << 5) + hashValue) + uint64(this[index])
         }
 
         return hashValue
