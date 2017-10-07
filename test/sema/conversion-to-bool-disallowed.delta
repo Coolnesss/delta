@@ -1,0 +1,6 @@
+// RUN: not %delta -typecheck %s | %FileCheck %s
+
+func main() {
+    // CHECK: [[@LINE+1]]:18: error: conversion from 'int' to 'bool' not supported
+    let b = bool(1);
+}
