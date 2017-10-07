@@ -55,6 +55,17 @@ struct String {
     mutating func removeLast() {
         characters.removeAt(characters.size() - 2)
     }
+
+    /// Supports using strings with sets and dicts
+    func hash() -> uint64 {
+        var hashValue: uint64 = 5381
+
+        for (index in 0..characters.size()) {
+            hashValue = ((hashValue << 5) + hashValue) + characters[index]
+        }
+
+        return hashValue
+    }
 }
 
 func +(a: StringRef, b: StringRef) -> String {

@@ -1,0 +1,36 @@
+class Set<Element: Hashable> {
+
+    var hashTable: Array<Array<Element> >;
+
+    var capacity: int64;
+    var size: int64;
+
+    init() {
+        size = 0;
+        capacity = 32; // TODO pick good number
+    }
+
+    mutating func insert(e: Element) {
+        let hashValue = e.hash() % capacity;
+        hashTable[hashValue].append(e);
+        size++;
+
+        if (loadFactor() > 3/4) {
+            resize();
+        }
+    }
+
+    mutating func resize() {
+        hashTable.reserve(size * 2);
+        capacity = size * 2;
+    }
+
+
+    func contains(e: Element) -> bool {
+        return true;
+    }
+
+    func loadFactor() -> float {
+        return capacity / (load * 1.0);
+    }
+}

@@ -1,0 +1,5 @@
+// RUN: check_exit_status 0 %delta run %s test-support.delta
+
+func main() {
+    var s = Set();
+}
