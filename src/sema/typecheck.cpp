@@ -349,11 +349,11 @@ Decl& TypeChecker::findDecl(llvm::StringRef name, SourceLocation location, bool 
     error(location, "unknown identifier '", name, "'");
 }
 
-llvm::SmallVector<Decl*, 1> TypeChecker::findDecls(llvm::StringRef name, bool everywhere) const {
-    llvm::SmallVector<Decl*, 1> decls;
+std::vector<Decl*> TypeChecker::findDecls(llvm::StringRef name, bool everywhere) const {
+    std::vector<Decl*> decls;
 
-    if (auto* methodDecl = llvm::dyn_cast_or_null<MethodDecl>(currentFunction)) {
-        for (auto& decl : methodDecl->getTypeDecl()->getMemberDecls()) {
+    if (auto* typeDecl = currentFunction ? currentFunction->getTypeDecl() : nullptr) {
+        for (auto& decl : typeDecl->getMemberDecls()) {
             if (auto* functionDecl = llvm::dyn_cast<FunctionDecl>(decl.get())) {
                 if (functionDecl->getName() == name) {
                     decls.emplace_back(decl.get());
