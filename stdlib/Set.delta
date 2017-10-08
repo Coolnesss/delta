@@ -15,7 +15,7 @@ class Set<Element: Hashable> {
         hashTable[hashValue].append(e);
         size++;
 
-        if (loadFactor() > 3/4) {
+        if (loadFactor() > 3 / (4 * 1.0)) {
             resize();
         }
     }
