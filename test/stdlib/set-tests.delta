@@ -1,5 +1,8 @@
 // RUN: check_exit_status 0 %delta run %s test-support.delta
 
 func main() {
-    var s = Set<String>();
+    var s = Set<StringRef>();
+
+    s.insert("ok");
+    s.insert("best");
 }

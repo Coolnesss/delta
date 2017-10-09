@@ -1,36 +1,69 @@
-class Set<Element: Hashable> {
+class Set<E: Hashable> {
 
-    var hashTable: Array<Array<Element> >;
+    var hashTable: Array<Array<E> >;
 
-    var capacity: int64;
-    var size: int64;
+    var capacity: uint64;
+    var size: uint64;
 
     init() {
         size = 0;
-        capacity = 32; // TODO pick good number
+        capacity = 128; // TODO pick good number
+        this.increaseTableSize();
     }
 
-    mutating func insert(e: Element) {
-        let hashValue = e.hash() % capacity;
+    mutating func insert(e: E) {
+        let hashValue = int(e.hash() % capacity);
         hashTable[hashValue].append(e);
         size++;
 
-        if (loadFactor() > 3 / (4 * 1.0)) {
+        if (loadFactor() > 0.66) {
             resize();
         }
     }
 
+    mutating func increaseTableSize() {
+        for(i in 0..int(capacity)) {
+            hashTable.append(Array<E>());
+        }
+    }
+
     mutating func resize() {
-        hashTable.reserve(size * 2);
-        capacity = size * 2;
+        var newTable = Array<Array<E> >();
+        let newCapacity = int(capacity * 2);
+        newTable.resize(newCapacity);
+
+        for (i in 0..int(capacity)) {
+            let e = hashTable[i];
+            if (e.size() != 0) {
+                for (j in 0..e.size()) {
+                    newTable[e[j].hash() % newCapacity] = *e;
+                }
+            }
+        }
+
+        capacity = newCapacity;
+        hashTable = newTable;
     }
 
 
-    func contains(e: Element) -> bool {
-        return true;
+    func contains(e: E) -> bool {
+        let hashValue = e.hash() % capacity;
+        let slot = hashTable[hashValue];
+
+        if (slot == null) {
+            return false;
+        }
+
+        for (i in 0..slot.size()) {
+            if (*slot[i] == e) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
-    func loadFactor() -> float {
-        return capacity / (load * 1.0);
+    func loadFactor() -> float64 {
+        return float64(size) / (float64(capacity) * 1.0);
     }
 }

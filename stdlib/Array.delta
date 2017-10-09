@@ -58,16 +58,6 @@ class Array<Element> {
         }
     }
 
-    /// Resizes the array to contain exactly newSize elements.
-    mutating func resize(newSize: int) {
-        if (newSize < size) {
-            return;
-        }
-        for (i in 0..(newSize - size)) {
-            this.append(null);
-        }
-    }
-
     /// Removes the first element from the array.
     /// Other elements are moved towards the beginning of the array by one index.
     mutating func removeFirst() {

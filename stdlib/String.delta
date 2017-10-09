@@ -56,13 +56,7 @@ class String {
 
     /// Supports using strings with sets and dicts
     func hash() -> uint64 {
-        var hashValue: uint64 = 5381
-
-        for (index in 0..characters.size()) {
-            hashValue = ((hashValue << 5) + hashValue) + uint64(this[index])
-        }
-
-        return hashValue
+        return StringRef(this).hash()
     }
 }
 
