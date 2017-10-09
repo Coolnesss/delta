@@ -1,20 +1,45 @@
 // RUN: %delta -print-ir %s | %FileCheck %s
 
-class C {
-    var i: int;
-    init() {}
+interface I {
+    func i();
 }
 
-class A<T> {
-    // CHECK: define {} @"A<C>.init"()
-    // CHECK-NEXT: %t = alloca %C
-    // CHECK-NEXT: %1 = alloca {}
-    // CHECK-NEXT: %2 = call %C @C.init()
-    init() {
-        let t = T();
+struct S {
+    let i: int;
+    init() {}
+    func i() {}
+}
+
+class A<E> {
+    init() {}
+
+    // CHECK: define %S @"A<S>.a"({}* %this)
+    func a() -> E {
+        // CHECK-NEXT: %1 = call %S @S.init()
+        // CHECK-NEXT: ret %S %1
+        return E();
+    }
+}
+
+class M<T: I> {
+    let t: T;
+
+    init() {}
+
+    // CHECK: define void @"M<S>.f"(%"M<S>"* %this)
+    func f() {
+        let a = A<T>();
+        // CHECK: %2 = call %S @"A<S>.a"({}* %a)
+        // CHECK-NEXT: call void @S.i(%S %2)
+        a.a().i();
     }
 }
 
 func main() {
+<<<<<<< HEAD
     let a = A<C>();
+=======
+    let m = M<S>();
+    m.f();
+>>>>>>> e1f3b82501bcd1c3a101a6684bebecaf7aefb380
 }
