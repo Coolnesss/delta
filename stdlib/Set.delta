@@ -8,7 +8,7 @@ class Set<E: Hashable> {
     init() {
         size = 0;
         capacity = 128; // TODO pick good number
-        this.increaseTableSize();
+        this.increaseTableSize(int(capacity));
     }
 
     mutating func insert(e: E) {
@@ -21,8 +21,8 @@ class Set<E: Hashable> {
         }
     }
 
-    mutating func increaseTableSize() {
-        for(i in 0..int(capacity)) {
+    mutating func increaseTableSize(newCapacity: int) {
+        for(i in 0..int(newCapacity)) {
             hashTable.append(Array<E>());
         }
     }
@@ -30,7 +30,7 @@ class Set<E: Hashable> {
     mutating func resize() {
         var newTable = Array<Array<E> >();
         let newCapacity = int(capacity * 2);
-        newTable.resize(newCapacity);
+        increaseTableSize(newCapacity);
 
         for (i in 0..int(capacity)) {
             let e = hashTable[i];
