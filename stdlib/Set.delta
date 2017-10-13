@@ -8,7 +8,7 @@ class Set<E: Hashable> {
     init() {
         size = 0;
         capacity = 128; // TODO pick good number
-        this.increaseTableSize(int(capacity));
+        increaseTableSize(int(capacity));
     }
 
     mutating func insert(e: E) {
@@ -36,21 +36,22 @@ class Set<E: Hashable> {
             let e = hashTable[i];
             if (e.size() != 0) {
                 for (j in 0..e.size()) {
-                    newTable[e[j].hash() % newCapacity] = *e;
+                    let el = e[j];
+                    *newTable[int(el.hash()) % newCapacity] = *e;
                 }
             }
         }
 
-        capacity = newCapacity;
+        capacity = uint64(newCapacity);
         hashTable = newTable;
     }
 
 
     func contains(e: E) -> bool {
-        let hashValue = e.hash() % capacity;
+        let hashValue = int(e.hash() % capacity);
         let slot = hashTable[hashValue];
 
-        if (slot == null) {
+        if (slot.size() == 0) {
             return false;
         }
 

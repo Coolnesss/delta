@@ -5,4 +5,7 @@ func main() {
 
     s.insert("ok");
     s.insert("best");
+
+    assert(s.contains("ok"), "ok");
+    assert(!s.contains("lol"), "not lol");
 }
