@@ -9,6 +9,8 @@ See the (incomplete) [specification document](docs/spec.md) for a detailed
 description of the language, or the more learning-oriented (and equally
 incomplete) [Delta Book](https://delta-lang.gitbooks.io/delta-book/content/).
 
+You can try out the language online at the [Delta Sandbox](https://delta-lang.github.io/delta-sandbox).
+
 ## Building from source
 
 Clone the repository including its submodules:
@@ -26,9 +28,9 @@ I recommend using [Ninja](https://ninja-build.org/) instead of Make, because it
 has cleaner output, and runs builds in parallel by default. It can be installed
 with `sudo apt install ninja-build` (Ubuntu) or `brew install ninja` (macOS).
 
-If you're on Ubuntu you can run the provided `setup-build-ubuntu.sh` script to
-automatically download all the dependencies and invoke the appropriate commands
-to generate a ready-to-use build system.
+If you're on Ubuntu or macOS you can run the provided `setup-build-*.sh` script
+to automatically download all the dependencies and invoke the appropriate
+commands to generate a ready-to-use build system.
 
 Otherwise, install the dependencies manually and do the following in the root
 directory of the repository:

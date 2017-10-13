@@ -3,7 +3,6 @@
 #include <llvm/ADT/STLExtras.h>
 #include <llvm/Support/ErrorHandling.h>
 #include "type.h"
-#include "type-resolver.h"
 #include "../support/utility.h"
 
 using namespace delta;
@@ -58,6 +57,38 @@ bool Type::isBuiltinScalar(llvm::StringRef typeName) {
     };
     return std::find(std::begin(builtinTypeNames), std::end(builtinTypeNames), typeName)
            != std::end(builtinTypeNames);
+}
+
+Type Type::resolve(const llvm::StringMap<Type>& replacements) const {
+    if (!typeBase) return Type(nullptr, isMutable());
+
+    switch (getKind()) {
+        case TypeKind::BasicType: {
+            auto it = replacements.find(getName());
+            if (it != replacements.end()) {
+                // TODO: Handle generic arguments for type placeholders.
+                return it->second.asMutable(isMutable());
+            }
+
+            auto genericArgs = map(getGenericArgs(), [&](Type t) { return t.resolve(replacements); });
+            return BasicType::get(getName(), std::move(genericArgs), isMutable());
+        }
+        case TypeKind::ArrayType:
+            return ArrayType::get(getElementType().resolve(replacements), getArraySize(), isMutable());
+
+        case TypeKind::TupleType: {
+            auto subtypes = map(getSubtypes(), [&](Type t) { return t.resolve(replacements); });
+            return TupleType::get(std::move(subtypes));
+        }
+        case TypeKind::FunctionType: {
+            auto paramTypes = map(getParamTypes(), [&](Type t) { return t.resolve(replacements); });
+            return FunctionType::get(getReturnType().resolve(replacements), std::move(paramTypes),
+                                     isMutable());
+        }
+        case TypeKind::PointerType:
+            return PointerType::get(getPointee().resolve(replacements), isReference(), isMutable());
+    }
+    llvm_unreachable("all cases handled");
 }
 
 void Type::appendType(Type type) {
@@ -158,7 +189,7 @@ void Type::setMutable(bool isMutable) {
 }
 
 llvm::StringRef Type::getName() const { return llvm::cast<BasicType>(typeBase)->getName(); }
-Type Type::getElementType() const { return llvm::cast<ArrayType>(typeBase)->getElementType(); }
+Type Type::getElementType() const { return llvm::cast<ArrayType>(typeBase)->getElementType().asMutable(isMutable()); }
 int64_t Type::getArraySize() const { return llvm::cast<ArrayType>(typeBase)->getSize(); }
 llvm::ArrayRef<Type> Type::getSubtypes() const { return llvm::cast<TupleType>(typeBase)->getSubtypes(); }
 llvm::ArrayRef<Type> Type::getGenericArgs() const { return llvm::cast<BasicType>(typeBase)->getGenericArgs(); }

@@ -3,9 +3,9 @@
 #include <vector>
 #include <memory>
 #include <string>
-#include <unordered_map>
 #include <llvm/ADT/ArrayRef.h>
 #include <llvm/ADT/SmallVector.h>
+#include <llvm/ADT/StringMap.h>
 #include <llvm/ADT/StringRef.h>
 #include <llvm/ADT/STLExtras.h>
 #include "decl.h"
@@ -41,8 +41,9 @@ public:
     void pushScope() { scopes.emplace_back(); }
     void popScope() { scopes.pop_back(); }
     void add(llvm::StringRef name, Decl* decl) { scopes.back()[name].push_back(decl); }
+    void addGlobal(llvm::StringRef name, Decl* decl) { scopes.front()[name].push_back(decl); }
     void addIdentifierReplacement(llvm::StringRef name, llvm::StringRef replacement) {
-        identifierReplacements.emplace(name, replacement);
+        identifierReplacements.try_emplace(name, replacement);
     }
     bool contains(const std::string& name) const { return !find(name).empty(); }
 
@@ -81,8 +82,8 @@ private:
         }
     }
 
-    std::vector<std::unordered_map<std::string, llvm::SmallVector<Decl*, 1>>> scopes;
-    std::unordered_map<std::string, std::string> identifierReplacements;
+    std::vector<llvm::StringMap<std::vector<Decl*>>> scopes;
+    llvm::StringMap<std::string> identifierReplacements;
 };
 
 /// Container for the AST of a whole module, comprised of one or more SourceFiles.

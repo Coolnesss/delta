@@ -1,11 +1,11 @@
 #include <iterator>
 #include <memory>
 #include <string>
-#include <unordered_map>
 #include <vector>
 #include <cstdlib>
 #include <system_error>
 #include <llvm/ADT/ArrayRef.h>
+#include <llvm/ADT/StringMap.h>
 #include <llvm/ADT/StringRef.h>
 #include <llvm/ADT/SmallVector.h>
 #include <llvm/ADT/STLExtras.h>
@@ -26,12 +26,12 @@
 using namespace delta;
 
 namespace delta {
-std::unordered_map<std::string, std::shared_ptr<Module>> allImportedModules;
+llvm::StringMap<std::shared_ptr<Module>> allImportedModules;
 }
 
 std::vector<Module*> delta::getAllImportedModules() {
     return map(allImportedModules,
-               [](const std::pair<std::string, std::shared_ptr<Module>>& p) { return p.second.get(); });
+               [](const llvm::StringMapEntry<std::shared_ptr<Module>>& p) { return p.second.get(); });
 }
 
 namespace {
@@ -41,7 +41,6 @@ std::vector<std::unique_ptr<Decl>> nonASTDecls;
 
 llvm::MutableArrayRef<FieldDecl> currentFieldDecls;
 Type functionReturnType = nullptr;
-bool inInitializer = false;
 int breakableBlocks = 0;
 
 }
@@ -166,11 +165,16 @@ void TypeChecker::typecheckAssignStmt(AssignStmt& stmt) const {
         error(stmt.getRHS()->getLocation(), "cannot assign '", rhsType, "' to variable of type '", lhsType, "'");
     }
 
-    if (!lhsType.isMutable() && !inInitializer) {
-        if (auto* varExpr = llvm::dyn_cast<VarExpr>(stmt.getLHS())) {
-            error(stmt.getLocation(), "cannot assign to immutable variable '", varExpr->getIdentifier(), "'");
-        } else {
-            error(stmt.getLocation(), "cannot assign to immutable expression");
+    if (!lhsType.isMutable()) {
+        switch (stmt.getLHS()->getKind()) {
+            case ExprKind::VarExpr:
+                error(stmt.getLocation(), "cannot assign to immutable variable '",
+                      llvm::cast<VarExpr>(stmt.getLHS())->getIdentifier(), "'");
+            case ExprKind::MemberExpr:
+                error(stmt.getLocation(), "cannot assign to immutable variable '",
+                      llvm::cast<MemberExpr>(stmt.getLHS())->getMemberName(), "'");
+            default:
+                error(stmt.getLocation(), "cannot assign to immutable expression");
         }
     }
 
@@ -198,80 +202,113 @@ void TypeChecker::typecheckStmt(Stmt& stmt) const {
     }
 }
 
+void TypeChecker::typecheckType(Type type) const {
+    switch (type.getKind()) {
+        case TypeKind::BasicType: {
+            auto* basicType = llvm::cast<BasicType>(type.get());
+
+            for (auto genericArg : basicType->getGenericArgs()) {
+                typecheckType(genericArg);
+            }
+
+            auto decls = findDecls(mangleTypeDecl(basicType->getName(), basicType->getGenericArgs()));
+
+            if (decls.empty()) {
+                auto decls = findDecls(basicType->getName());
+
+                if (!decls.empty()) {
+                    auto p = llvm::cast<TypeTemplate>(decls[0])->instantiate(basicType->getGenericArgs());
+                    addToSymbolTable(*p);
+                    typecheckTypeDecl(*p);
+                }
+            } else {
+                auto& typeDecl = llvm::cast<TypeDecl>(*decls[0]);
+                if (auto* deinitDecl = typeDecl.getDeinitializer()) {
+                    typecheckFunctionDecl(*deinitDecl);
+                }
+            }
+
+            break;
+        }
+        case TypeKind::ArrayType:
+            typecheckType(type.getElementType());
+            break;
+        case TypeKind::TupleType:
+            for (auto subtype : type.getSubtypes()) {
+                typecheckType(subtype);
+            }
+            break;
+        case TypeKind::FunctionType:
+            for (auto paramType : type.getParamTypes()) {
+                typecheckType(paramType);
+            }
+            typecheckType(type.getReturnType());
+            break;
+        case TypeKind::PointerType: {
+            if (type.getPointee().isUnsizedArrayType()) {
+                auto& arrayRef = llvm::cast<TypeTemplate>(findDecl("ArrayRef", SourceLocation::invalid()));
+                auto* instantiation = arrayRef.instantiate({type.getPointee().getElementType()});
+                addToSymbolTable(*instantiation);
+                typecheckTypeDecl(*instantiation);
+            } else {
+                typecheckType(type.getPointee());
+            }
+            break;
+        }
+        default:
+            break;
+    }
+}
+
 void TypeChecker::typecheckParamDecl(ParamDecl& decl) const {
     if (getCurrentModule()->getSymbolTable().contains(decl.getName())) {
         error(decl.getLocation(), "redefinition of '", decl.getName(), "'");
     }
 
-    if (auto* basicType = llvm::dyn_cast<BasicType>(decl.getType().get())) {
-        auto decls = findDecls(basicType->getName());
-        if (!decls.empty()) {
-            auto& typeDecl = llvm::cast<TypeDecl>(*decls[0]);
-            if (auto* deinitDecl = typeDecl.getDeinitializer()) {
-                SAVE_STATE(currentGenericArgs);
-                ASSERT(basicType->getGenericArgs().size() == typeDecl.getGenericParams().size());
-                for (auto t : llvm::zip_first(typeDecl.getGenericParams(), basicType->getGenericArgs())) {
-                    currentGenericArgs.emplace(std::get<0>(t).getName(), std::get<1>(t));
-                }
-                SAVE_STATE(typecheckingGenericFunction);
-                typecheckingGenericFunction = true;
-                typecheckDeinitDecl(*deinitDecl);
-            }
-        }
-    }
-
+    typecheckType(decl.getType());
     getCurrentModule()->getSymbolTable().add(decl.getName(), &decl);
 }
 
-void TypeChecker::addToSymbolTableWithName(Decl& decl, llvm::StringRef name) const {
+void TypeChecker::addToSymbolTableWithName(Decl& decl, llvm::StringRef name, bool global) const {
     if (getCurrentModule()->getSymbolTable().contains(name)) {
         error(decl.getLocation(), "redefinition of '", name, "'");
     }
-    getCurrentModule()->getSymbolTable().add(name, &decl);
+
+    if (global) {
+        getCurrentModule()->getSymbolTable().addGlobal(name, &decl);
+    } else {
+        getCurrentModule()->getSymbolTable().add(name, &decl);
+    }
 }
 
-template<typename DeclT>
-void TypeChecker::addToSymbolTableCheckParams(DeclT& decl) const {
-    if (getCurrentModule()->getSymbolTable().findWithMatchingParams(decl)) {
+void TypeChecker::addToSymbolTable(FunctionTemplate& decl) const {
+    if (getCurrentModule()->getSymbolTable().findWithMatchingParams(*decl.getFunctionDecl())) {
         error(decl.getLocation(), "redefinition of '", mangle(decl), "'");
     }
-    getCurrentModule()->getSymbolTable().add(mangle(decl), &decl);
+    getCurrentModule()->getSymbolTable().addGlobal(mangle(decl), &decl);
 }
 
 void TypeChecker::addToSymbolTable(FunctionDecl& decl) const {
-    addToSymbolTableCheckParams(decl);
+    if (getCurrentModule()->getSymbolTable().findWithMatchingParams(decl)) {
+        error(decl.getLocation(), "redefinition of '", mangle(decl), "'");
+    }
+    getCurrentModule()->getSymbolTable().addGlobal(mangle(decl), &decl);
 }
 
-void TypeChecker::addToSymbolTable(InitDecl& decl) const {
-    addToSymbolTableCheckParams(decl);
-}
-
-void TypeChecker::addToSymbolTable(DeinitDecl& decl) const {
-    addToSymbolTableWithName(decl, mangle(decl));
+void TypeChecker::addToSymbolTable(TypeTemplate& decl) const {
+    addToSymbolTableWithName(decl, decl.getTypeDecl()->getName(), true);
 }
 
 void TypeChecker::addToSymbolTable(TypeDecl& decl) const {
-    addToSymbolTableWithName(decl, decl.getName());
+    addToSymbolTableWithName(decl, mangle(decl), true);
 
     for (auto& memberDecl : decl.getMemberDecls()) {
-        switch (memberDecl->getKind()) {
-            case DeclKind::MethodDecl:
-                addToSymbolTable(llvm::cast<MethodDecl>(*memberDecl));
-                break;
-            case DeclKind::InitDecl:
-                addToSymbolTable(llvm::cast<InitDecl>(*memberDecl));
-                break;
-            case DeclKind::DeinitDecl:
-                addToSymbolTable(llvm::cast<DeinitDecl>(*memberDecl));
-                break;
-            default:
-                llvm_unreachable("invalid member declaration kind");
-        }
+        addToSymbolTable(*memberDecl);
     }
 }
 
-void TypeChecker::addToSymbolTable(VarDecl& decl) const {
-    addToSymbolTableWithName(decl, decl.getName());
+void TypeChecker::addToSymbolTable(VarDecl& decl, bool global) const {
+    addToSymbolTableWithName(decl, decl.getName(), global);
 }
 
 template<typename DeclT>
@@ -408,28 +445,10 @@ void TypeChecker::typecheckGenericParamDecls(llvm::ArrayRef<GenericParamDecl> ge
     }
 }
 
-std::vector<Type> TypeChecker::getGenericArgsAsArray() const {
-    return map(currentGenericArgs, [](const std::pair<std::string, Type>& p) { return p.second; });
-}
-
-std::vector<Type> TypeChecker::getUnresolvedGenericArgs() const {
-    return map(currentGenericArgs, [](const std::pair<std::string, Type>& p) {
-        return BasicType::get(p.first, {});
-    });
-}
-
-void TypeChecker::typecheckFunctionLikeDecl(FunctionLikeDecl& decl) const {
-    if (decl.isExtern()) return;
-
-    if (decl.isGeneric() && currentGenericArgs.empty()) {
-        typecheckGenericParamDecls(decl.getGenericParams());
-        return; // Partial type-checking of uninstantiated generic functions not implemented yet.
-    }
+void TypeChecker::typecheckFunctionDecl(FunctionDecl& decl) const {
+    if (decl.isExtern()) return; // TODO: Typecheck parameters and return type of extern functions.
 
     TypeDecl* receiverTypeDecl = decl.getTypeDecl();
-    if (receiverTypeDecl && receiverTypeDecl->isGeneric() && currentGenericArgs.empty()) {
-        return; // Partial type-checking of uninstantiated generic functions not implemented yet.
-    }
 
     getCurrentModule()->getSymbolTable().pushScope();
     SAVE_STATE(currentFunction);
@@ -443,67 +462,48 @@ void TypeChecker::typecheckFunctionLikeDecl(FunctionLikeDecl& decl) const {
     }
     if (decl.getReturnType().isMutable()) error(decl.getLocation(), "return types cannot be 'mutable'");
 
-    if (decl.getBody()) {
+    if (!decl.isExtern()) {
         SAVE_STATE(functionReturnType);
         functionReturnType = decl.getReturnType();
         SAVE_STATE(currentFieldDecls);
         if (receiverTypeDecl) {
             currentFieldDecls = receiverTypeDecl->getFields();
-            Type thisType = receiverTypeDecl->getTypeForPassing(getUnresolvedGenericArgs(), decl.isMutating());
-            addToSymbolTable(VarDecl(thisType, "this", nullptr, *getCurrentModule(), SourceLocation::invalid()));
+            Type thisType = receiverTypeDecl->getTypeForPassing(decl.isMutating());
+            addToSymbolTable(VarDecl(thisType, "this", nullptr, *getCurrentModule(), decl.getLocation()));
         }
 
-        for (auto& stmt : *decl.getBody()) {
+        for (auto& stmt : decl.getBody()) {
             typecheckStmt(*stmt);
         }
     }
 
     getCurrentModule()->getSymbolTable().popScope();
 
-    if (!decl.getReturnType().isVoid() && !allPathsReturn(*decl.getBody())) {
+    if ((!receiverTypeDecl || !receiverTypeDecl->isInterface())
+        && !decl.getReturnType().isVoid() && !allPathsReturn(decl.getBody())) {
         error(decl.getLocation(), "'", decl.getName(), "' is missing a return statement");
     }
 }
 
-void TypeChecker::typecheckInitDecl(InitDecl& decl) const {
-    getCurrentModule()->getSymbolTable().pushScope();
-    SAVE_STATE(currentFunction);
-    currentFunction = &decl;
-
-    if (decl.getTypeDecl()->isGeneric() && currentGenericArgs.empty()) {
-        return; // Partial type-checking of uninstantiated generic functions not implemented yet.
-    }
-
-    addToSymbolTable(VarDecl(decl.getTypeDecl()->getType(getGenericArgsAsArray(), true),
-                             "this", nullptr, *getCurrentModule(), SourceLocation::invalid()));
-    for (ParamDecl& param : decl.getParams()) typecheckParamDecl(param);
-
-    SAVE_STATE(inInitializer);
-    inInitializer = true;
-    SAVE_STATE(currentFieldDecls);
-    currentFieldDecls = decl.getTypeDecl()->getFields();
-    for (auto& stmt : *decl.getBody()) {
-        typecheckStmt(*stmt);
-    }
-
-    getCurrentModule()->getSymbolTable().popScope();
-}
-
-void TypeChecker::typecheckDeinitDecl(DeinitDecl& decl) const {
-    if (decl.getTypeDecl()->isGeneric() && currentGenericArgs.empty()) {
-        return; // Partial type-checking of uninstantiated generic functions not implemented yet.
-    }
-    typecheckFunctionLikeDecl(decl);
+void TypeChecker::typecheckFunctionTemplate(FunctionTemplate& decl) const {
+    typecheckGenericParamDecls(decl.getGenericParams());
 }
 
 void TypeChecker::typecheckTypeDecl(TypeDecl& decl) const {
+    for (auto& fieldDecl : decl.getFields()) {
+        typecheckFieldDecl(fieldDecl);
+    }
     for (auto& memberDecl : decl.getMemberDecls()) {
         typecheckMemberDecl(*memberDecl);
     }
 }
 
+void TypeChecker::typecheckTypeTemplate(TypeTemplate& decl) const {
+    typecheckGenericParamDecls(decl.getGenericParams());
+}
+
 TypeDecl* TypeChecker::getTypeDecl(const BasicType& type) const {
-    auto decls = findDecls(type.getName());
+    auto decls = findDecls(mangleTypeDecl(type.getName(), type.getGenericArgs()));
     if (decls.empty()) return nullptr;
     ASSERT(decls.size() == 1);
     return llvm::cast<TypeDecl>(decls[0]);
@@ -541,14 +541,16 @@ void TypeChecker::typecheckVarDecl(VarDecl& decl, bool isGlobal) const {
         decl.setType(initType);
     }
 
-    if (!isGlobal) addToSymbolTable(decl);
+    if (!isGlobal) addToSymbolTable(decl, false);
 
     if (decl.getInitializer() && !isImplicitlyCopyable(decl.getType())) {
         decl.getInitializer()->markAsMoved();
     }
 }
 
-void typecheckFieldDecl(FieldDecl&) {}
+void TypeChecker::typecheckFieldDecl(FieldDecl& decl) const {
+    typecheckType(decl.getType());
+}
 
 std::error_code parseSourcesInDirectoryRecursively(llvm::StringRef directoryPath, Module& module,
                                                    ParserFunction& parse) {
@@ -634,12 +636,14 @@ void TypeChecker::typecheckTopLevelDecl(Decl& decl, const PackageManifest* manif
                                         ParserFunction& parse) const {
     switch (decl.getKind()) {
         case DeclKind::ParamDecl: llvm_unreachable("no top-level parameter declarations");
-        case DeclKind::FunctionDecl: typecheckFunctionLikeDecl(llvm::cast<FunctionDecl>(decl)); break;
+        case DeclKind::FunctionDecl: typecheckFunctionDecl(llvm::cast<FunctionDecl>(decl)); break;
         case DeclKind::MethodDecl: llvm_unreachable("no top-level method declarations");
         case DeclKind::GenericParamDecl: llvm_unreachable("no top-level parameter declarations");
         case DeclKind::InitDecl: llvm_unreachable("no top-level initializer declarations");
         case DeclKind::DeinitDecl: llvm_unreachable("no top-level deinitializer declarations");
+        case DeclKind::FunctionTemplate: typecheckFunctionTemplate(llvm::cast<FunctionTemplate>(decl)); break;
         case DeclKind::TypeDecl: typecheckTypeDecl(llvm::cast<TypeDecl>(decl)); break;
+        case DeclKind::TypeTemplate: typecheckTypeTemplate(llvm::cast<TypeTemplate>(decl)); break;
         case DeclKind::VarDecl: typecheckVarDecl(llvm::cast<VarDecl>(decl), true); break;
         case DeclKind::FieldDecl: llvm_unreachable("no top-level field declarations");
         case DeclKind::ImportDecl: typecheckImportDecl(llvm::cast<ImportDecl>(decl), manifest,
@@ -649,25 +653,35 @@ void TypeChecker::typecheckTopLevelDecl(Decl& decl, const PackageManifest* manif
 
 void TypeChecker::typecheckMemberDecl(Decl& decl) const {
     switch (decl.getKind()) {
-        case DeclKind::MethodDecl: typecheckFunctionLikeDecl(llvm::cast<MethodDecl>(decl)); break;
-        case DeclKind::InitDecl: typecheckInitDecl(llvm::cast<InitDecl>(decl)); break;
-        case DeclKind::DeinitDecl: typecheckDeinitDecl(llvm::cast<DeinitDecl>(decl)); break;
+        case DeclKind::MethodDecl:
+        case DeclKind::InitDecl:
+        case DeclKind::DeinitDecl: typecheckFunctionDecl(llvm::cast<MethodDecl>(decl)); break;
         case DeclKind::FieldDecl: typecheckFieldDecl(llvm::cast<FieldDecl>(decl)); break;
         default: llvm_unreachable("invalid member declaration kind");
     }
 }
 
 void TypeChecker::postProcess() {
-    SAVE_STATE(currentGenericArgs);
-    SAVE_STATE(typecheckingGenericFunction);
-    typecheckingGenericFunction = true;
+    SAVE_STATE(isPostProcessing);
+    isPostProcessing = true;
 
-    while (!genericFunctionInstantiationsToTypecheck.empty()) {
-        auto genericFunctionInstantiations = std::move(genericFunctionInstantiationsToTypecheck);
-        for (auto& functionDeclAndGenericArgs : genericFunctionInstantiations) {
-            currentGenericArgs = functionDeclAndGenericArgs.second;
-            // TODO: Don't typecheck more than once with the same generic arguments.
-            typecheckFunctionLikeDecl(functionDeclAndGenericArgs.first);
+    while (!declsToTypecheck.empty()) {
+        auto genericFunctionInstantiations = std::move(declsToTypecheck);
+
+        for (auto* decl : genericFunctionInstantiations) {
+            switch (decl->getKind()) {
+                case DeclKind::FunctionDecl:
+                    typecheckFunctionDecl(*llvm::cast<FunctionDecl>(decl));
+                    break;
+                case DeclKind::FunctionTemplate:
+                    typecheckFunctionTemplate(*llvm::cast<FunctionTemplate>(decl));
+                    break;
+                case DeclKind::TypeDecl:
+                    typecheckTypeDecl(*llvm::cast<TypeDecl>(decl));
+                    break;
+                default:
+                    llvm_unreachable("invalid deferred decl");
+            }
         }
     }
 }
