@@ -8,6 +8,7 @@ class Set<E: Hashable> {
     init() {
         size = 0;
         capacity = 128; // TODO pick good number
+        hashTable = Array<Array<E> >();
         increaseTableSize(int(capacity));
     }
 
